@@ -12,11 +12,15 @@ jobs:
     runs-on: macos-14
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # 引擎与词库都不在仓库里（400M 语法模型超出 GitHub 限制），
       # 每次构建时从上游拉取。这样也保证用的总是最新版。
       - name: 获取引擎与词库
+        env:
+          # 查鼠须管版本号要调 GitHub API，匿名请求限流到 60 次/小时/IP，
+          # runner 的出口 IP 是共享的，不带认证会被 403 挡掉
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bash fetch_sources.sh "$RUNNER_TEMP/sources"
 
       - name: 生成载荷

@@ -23,13 +23,29 @@ RIME_ICE_REPO="https://github.com/iDvel/rime-ice.git"
 echo "==> 获取鼠须管引擎"
 # 官方只发 .pkg，里面才是 Squirrel.app。用 pkgutil 展开而不是
 # installer，因为 CI 里不该真去安装输入法，只要取出 app。
-SQ_TAG=$(curl -fsSL "https://api.github.com/repos/rime/squirrel/releases/latest" \
+#
+# 查版本号要带认证：GitHub API 对匿名请求限流到每小时 60 次/IP，
+# CI runner 的出口 IP 是共享的，额度通常早被占满，会直接返回 403。
+# GH_TOKEN 由 workflow 传入；本地运行时没有它也能跑，只是可能撞限流。
+AUTH=()
+if [ -n "$GH_TOKEN" ]; then
+    AUTH=(-H "Authorization: Bearer $GH_TOKEN")
+fi
+
+SQ_TAG=$(curl -fsSL "${AUTH[@]}" \
+    "https://api.github.com/repos/rime/squirrel/releases/latest" \
     | grep -m1 '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
-[ -n "$SQ_TAG" ] || { echo "错误：取不到鼠须管版本号"; exit 1; }
+if [ -z "$SQ_TAG" ]; then
+    echo "错误：取不到鼠须管版本号"
+    echo "      多半是 GitHub API 限流。设置 GH_TOKEN 环境变量后重试。"
+    exit 1
+fi
 echo "    版本 $SQ_TAG"
 
 PKG="$DEST/squirrel.pkg"
-curl -fsSL -o "$PKG" \
+# release 附件走的是 objects.githubusercontent.com，不受 API 限流影响，
+# 但带上认证也无妨，且能避免仓库转为私有后取不到
+curl -fSL --retry 3 --retry-delay 5 "${AUTH[@]}" -o "$PKG" \
     "https://github.com/rime/squirrel/releases/download/$SQ_TAG/Squirrel-$SQ_TAG.pkg"
 
 EXPAND="$DEST/.pkg_expand"
