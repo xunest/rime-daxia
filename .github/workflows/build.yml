@@ -1,0 +1,62 @@
+name: 构建 macOS 版
+
+# 手动触发，或推 tag 时自动发布
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    runs-on: macos-14
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # 引擎与词库都不在仓库里（400M 语法模型超出 GitHub 限制），
+      # 每次构建时从上游拉取。这样也保证用的总是最新版。
+      - name: 获取引擎与词库
+        run: bash fetch_sources.sh "$RUNNER_TEMP/sources"
+
+      - name: 生成载荷
+        env:
+          SQUIRREL_SRC: ${{ runner.temp }}/sources/Squirrel.app
+          RIME_SRC: ${{ runner.temp }}/sources/rime
+        run: |
+          # make_payload.sh 需要先有编译产物才能导出菜单栏图标
+          bash build.sh test
+          bash make_payload.sh
+
+      - name: 构建并打包
+        run: bash release.sh --zip
+
+      - name: 校验产物
+        run: |
+          APP="dist/大侠输入法.app"
+          echo "架构：$(lipo -archs "$APP/Contents/MacOS/DaxiaIME")"
+          # 必须是双架构，否则 Intel 机器装不了
+          lipo -archs "$APP/Contents/MacOS/DaxiaIME" | grep -q x86_64
+          lipo -archs "$APP/Contents/MacOS/DaxiaIME" | grep -q arm64
+          codesign --verify --deep --strict "$APP"
+          echo "签名有效"
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: 大侠输入法
+          path: 大侠输入法.zip
+          # 400M 的包留太久会占满配额
+          retention-days: 14
+
+      # 推 tag 时顺便发一个 Release，方便分享下载链接
+      - name: 发布 Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: 大侠输入法.zip
+          body: |
+            下载 `大侠输入法.zip`，解压后双击安装。
+
+            首次打开若被系统拦截，右键点图标选「打开」，
+            或在终端执行 `xattr -cr 大侠输入法.app`。

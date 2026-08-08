@@ -1,0 +1,20 @@
+# 构建产物
+.build_manual/
+dist/
+dmg_stage/
+*.dmg
+*.zip
+
+# 安装载荷：400M 语法模型远超 GitHub 单文件限制，
+# 由 CI 每次从上游拉取，不进仓库
+payload/
+
+# 个人数据备份：含词频记忆与机器指纹，绝不能提交
+Rime-backup-*/
+Squirrel-backup-*.app/
+
+.DS_Store
+
+# 编辑器与工具的本地配置
+.vscode/
+.writerHelper/
