@@ -66,8 +66,41 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: 大侠输入法.zip
+          # 尚未在多台机器验证过，标为预发布更诚实
+          prerelease: true
           body: |
-            下载 `大侠输入法.zip`，解压后双击安装。
+            ## 安装
 
-            首次打开若被系统拦截，右键点图标选「打开」，
-            或在终端执行 `xattr -cr 大侠输入法.app`。
+            下载 `大侠输入法.zip`，解压后双击 app，点「安装」并输入密码。
+
+            装完会自动切换到大侠输入法，可以直接打字。
+
+            ## 首次打开被系统拦截
+
+            这个包用的是 adhoc 签名（没有 Apple 开发者证书），
+            首次打开需要绕过 Gatekeeper：
+
+            **右键点图标 → 选「打开」→ 再点「打开」**
+
+            或在终端执行：
+
+            ```bash
+            xattr -cr 大侠输入法.app
+            ```
+
+            ## 说明
+
+            - 支持 Intel 与 Apple 芯片，一个包通用
+            - 需要 macOS 13.0 或更高版本
+            - 已在用 Rime 的话，你的词库与设置不会被覆盖
+            - 纯本地离线，不联网、不上传任何输入数据
+
+            ## 卸载
+
+            ```bash
+            sudo rm -rf "/Library/Input Methods/Squirrel.app"
+            rm -rf ~/Library/Rime
+            rm -rf "/Applications/大侠输入法.app"
+            ```
+
+            卸载前先点状态栏图标选「退出」，否则进程还在会残留图标。
