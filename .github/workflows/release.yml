@@ -16,6 +16,11 @@ jobs:
   release:
     runs-on: macos-14
 
+    # CI 自带的 GITHUB_TOKEN 默认只读，创建 Release 需要显式给写权限，
+    # 否则最后一步会 403 "Resource not accessible by integration"
+    permissions:
+      contents: write
+
     steps:
       - uses: actions/checkout@v5
 
