@@ -571,21 +571,30 @@ enum SelfTest {
         check("字体库无重复",
               Set(FontLibrary.chineseFamilies).count == FontLibrary.chineseFamilies.count)
 
-        // 分类：黑体、宋体、楷体、行书都要有内容，否则挑字体没意义
+        // 分类：黑体、宋体要有内容，否则挑字体没意义。
+        // 苹方与宋体是 macOS 自带，任何机器上都在。
         let groups = Dictionary(uniqueKeysWithValues: FontLibrary.grouped.map { ($0.0, $0.1) })
         check("有黑体分类", !(groups[.sans] ?? []).isEmpty)
         check("有宋体分类", !(groups[.serif] ?? []).isEmpty)
-        check("有楷体分类", !(groups[.kai] ?? []).isEmpty)
-        check("有行书分类", !(groups[.script] ?? []).isEmpty)
 
         check("苹方归入黑体",
               groups[.sans]?.contains { $0.family == "PingFang SC" } == true)
-        check("楷体归入楷体类",
-              groups[.kai]?.contains { $0.family == "Kaiti SC" } == true)
         check("宋体归入宋体类",
               groups[.serif]?.contains { $0.family == "Songti SC" } == true)
-        check("行楷归入行书类",
-              groups[.script]?.contains { $0.family == "Xingkai SC" } == true)
+
+        // 楷体与行楷属于「附加字体」，需要用户在系统里手动下载。
+        // CI 的构建机是干净系统，装不了这些字体，所以只在本机装了
+        // 的情况下才校验分类是否正确。
+        if FontLibrary.chineseFamilies.contains("Kaiti SC") {
+            check("有楷体分类", !(groups[.kai] ?? []).isEmpty)
+            check("楷体归入楷体类",
+                  groups[.kai]?.contains { $0.family == "Kaiti SC" } == true)
+        }
+        if FontLibrary.chineseFamilies.contains("Xingkai SC") {
+            check("有行书分类", !(groups[.script] ?? []).isEmpty)
+            check("行楷归入行书类",
+                  groups[.script]?.contains { $0.family == "Xingkai SC" } == true)
+        }
 
         check("分组总数与扁平列表一致",
               FontLibrary.grouped.reduce(0) { $0 + $1.1.count } == FontLibrary.choices.count)
