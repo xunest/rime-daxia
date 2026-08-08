@@ -28,11 +28,13 @@ jobs:
           SQUIRREL_SRC: ${{ runner.temp }}/sources/Squirrel.app
           RIME_SRC: ${{ runner.temp }}/sources/rime
         run: |
-          # make_payload.sh 需要先有编译产物才能导出菜单栏图标
-          bash build.sh test
+          # make_payload.sh 需要 .icns 与可执行文件才能导出菜单栏矢量图标，
+          # 这两样由完整的 build.sh 产出——build.sh test 只跑自测就退出了。
+          bash build.sh
           bash make_payload.sh
 
-      - name: 构建并打包
+      - name: 打包（内嵌载荷）
+        # 载荷已就位，再跑一次把它嵌进 app 并出 zip
         run: bash release.sh --zip
 
       - name: 校验产物
