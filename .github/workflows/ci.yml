@@ -1,0 +1,32 @@
+name: 检查
+
+# 日常推代码只做编译与自测，不打完整包。
+#
+# 为什么要拆：macOS runner 按 10 倍计费，完整构建一次跑 20 分钟，
+# 实际扣 200 分钟额度，免费额度每月 2000 分钟。若每次推送都完整打包，
+# 推十次就用光了。轻量检查约 2 分钟，日常反馈够用。
+#
+# 完整打包见 release.yml，只在发版打 tag 时跑。
+on:
+  push:
+    branches:
+      - main
+    # 改文档不必跑构建
+    paths-ignore:
+      - "**/*.md"
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: macos-14
+
+    steps:
+      - uses: actions/checkout@v5
+
+      # 只编译加跑自测，不碰引擎与词库——那两样要从上游下载几百兆，
+      # 是完整打包才需要的。
+      - name: 编译与自测
+        run: bash build.sh test

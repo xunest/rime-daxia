@@ -1,14 +1,19 @@
-name: 构建 macOS 版
+name: 发布
 
-# 手动触发，或推 tag 时自动发布
+# 只在发版时跑：打 tag 推上去，或在网页上手动触发。
+#
+# 这条流程要下载几百兆的引擎与词库、压缩载荷、双架构编译，
+# 一次约 20 分钟。macOS runner 按 10 倍计费，实际扣 200 分钟额度，
+# 所以不放在日常推送里。日常检查见 ci.yml。
 on:
-  workflow_dispatch:
   push:
     tags:
       - "v*"
+  # 手动触发时不发 Release，只产出可下载的构建产物，便于发版前试装
+  workflow_dispatch:
 
 jobs:
-  build:
+  release:
     runs-on: macos-14
 
     steps:
@@ -55,8 +60,8 @@ jobs:
           # 400M 的包留太久会占满配额
           retention-days: 14
 
-      # 推 tag 时顺便发一个 Release，方便分享下载链接
       - name: 发布 Release
+        # 只有打了 tag 才发布；手动触发只产出上面那个构建产物
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:

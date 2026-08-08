@@ -44,6 +44,26 @@ bash fetch_sources.sh /tmp/sources
 SQUIRREL_SRC=/tmp/sources/Squirrel.app RIME_SRC=/tmp/sources/rime bash make_payload.sh
 ```
 
+## 自动化流程
+
+两条 GitHub Actions 流程，按开销分开：
+
+| 流程 | 触发 | 内容 | 耗时 |
+|------|------|------|------|
+| 检查 | 推代码到 main、提 PR | 编译 + 自测 | 约 2 分钟 |
+| 发布 | 推 `v*` tag | 完整打包 + 发 Release | 约 20 分钟 |
+
+macOS runner 按 10 倍计费，完整打包一次实际消耗约 200 分钟额度，
+所以不放进日常推送。发版时：
+
+```bash
+git tag v0.2 && git push origin v0.2
+```
+
+CI 会自动构建并把 zip 发到 Releases。想在发版前试装，
+可在 Actions 页面手动触发「发布」流程——手动触发只产出
+可下载的构建产物，不会创建 Release。
+
 ## 致谢与许可
 
 本项目基于以下开源项目：
