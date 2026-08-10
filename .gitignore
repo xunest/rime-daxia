@@ -11,7 +11,12 @@ payload/
 
 # 个人数据备份：含词频记忆与机器指纹，绝不能提交
 Rime-backup-*/
+Squirrel-backup-*/
 Squirrel-backup-*.app/
+.rime-backup/
+
+# 上游源码检出目录：由 release.sh 按需拉取，不进仓库
+.sources/
 
 .DS_Store
 

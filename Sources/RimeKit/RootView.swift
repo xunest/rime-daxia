@@ -137,12 +137,6 @@ struct RootView: View {
                 .buttonStyle(.borderless)
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
-
-                Button("保存") {
-                    if nav == .skin { store.applyAppearance() }
-                    else { store.applyGeneral() }
-                }
-                .buttonStyle(.bordered)
             }
 
             Button {

@@ -31,6 +31,7 @@ enum Installer {
         case unpackFailed(String)
         case privilegedFailed(String)
         case configFailed(String)
+        case uninstallFailed(String)
 
         var errorDescription: String? {
             switch self {
@@ -39,11 +40,21 @@ enum Installer {
             case .unpackFailed(let m):
                 return "解压失败：\(m)"
             case .privilegedFailed(let m):
-                return "安装引擎失败：\(m)"
+                return m
             case .configFailed(let m):
                 return "铺设配置失败：\(m)"
+            case .uninstallFailed(let m):
+                return "卸载失败：\(m)"
             }
         }
+    }
+
+    /// 卸载范围
+    enum UninstallScope {
+        /// 只删设置工具，保留引擎、输入源与配置
+        case settingsOnly
+        /// 删设置工具 + 引擎，并注销输入源；配置可选
+        case everything
     }
 
     // MARK: - 路径
@@ -263,7 +274,7 @@ enum Installer {
                 throw InstallError.privilegedFailed("已取消授权，未做任何改动")
             }
             throw InstallError.privilegedFailed(
-                msg.trimmingCharacters(in: .whitespacesAndNewlines))
+                "授权操作失败：" + msg.trimmingCharacters(in: .whitespacesAndNewlines))
         }
     }
 
@@ -495,6 +506,140 @@ enum Installer {
         p.standardError = Pipe()
         try? p.run()
         p.waitUntilExit()
+    }
+
+    // MARK: - 卸载
+
+    /// 执行卸载。回调在主线程。
+    ///
+    /// - settingsOnly：优先用户态删除设置工具，不弹密码；
+    ///   若安装时由管理员写入导致无权删除，再提权只删设置工具。
+    /// - everything：提权一次删引擎与设置工具，用户态注销输入源，
+    ///   `removeConfig == true` 时再删 `~/Library/Rime`。
+    /// 成功后会退出应用。
+    static func uninstall(scope: UninstallScope,
+                          removeConfig: Bool = false,
+                          completion: @escaping (Bool, String) -> Void) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                switch scope {
+                case .settingsOnly:
+                    try uninstallSettingsOnly()
+                case .everything:
+                    try uninstallEverything(removeConfig: removeConfig)
+                }
+                DispatchQueue.main.async {
+                    completion(true, "已卸载")
+                    // 稍后再退，让界面先吃到成功回调
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        NSApp.terminate(nil)
+                    }
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    completion(false, error.localizedDescription)
+                }
+            }
+        }
+    }
+
+    /// 仅卸载设置工具
+    private static func uninstallSettingsOnly() throws {
+        let paths = settingsAppPathsToRemove()
+        guard !paths.isEmpty else {
+            throw InstallError.uninstallFailed("未找到可卸载的设置工具")
+        }
+
+        let fm = FileManager.default
+        var needPrivilege: [String] = []
+
+        for path in paths {
+            do {
+                try fm.removeItem(atPath: path)
+            } catch {
+                needPrivilege.append(path)
+            }
+        }
+
+        // 安装时经管理员 ditto 写入的副本属主是 root，用户态删不掉
+        if !needPrivilege.isEmpty {
+            let quoted = needPrivilege.map { "'\($0)'" }.joined(separator: " ")
+            try runPrivileged("""
+                set -e
+                for p in \(quoted); do
+                  rm -rf "$p"
+                done
+                """)
+        }
+    }
+
+    /// 卸载全部：引擎 + 设置工具 + 注销输入源，可选清配置
+    private static func uninstallEverything(removeConfig: Bool) throws {
+        // 先在用户态关掉输入源，提权会话改不到登录用户的偏好
+        disableInputSource()
+
+        var script = """
+        set -e
+        /usr/bin/pkill -9 -x Squirrel 2>/dev/null || true
+        sleep 1
+        rm -rf '\(engineDest)'
+        /usr/bin/pkill -9 -x Squirrel 2>/dev/null || true
+        """
+
+        for path in settingsAppPathsToRemove() {
+            script += "\nrm -rf '\(path)'"
+        }
+
+        try runPrivileged(script)
+
+        if removeConfig {
+            let dir = RimeConfig.rimeDir
+            if FileManager.default.fileExists(atPath: dir.path) {
+                try FileManager.default.removeItem(at: dir)
+            }
+        }
+    }
+
+    /// 需要删除的设置工具路径（Applications 副本 + 当前正在跑的 .app）
+    private static func settingsAppPathsToRemove() -> [String] {
+        let fm = FileManager.default
+        var paths: [String] = []
+        var seen = Set<String>()
+
+        func add(_ path: String) {
+            guard !seen.contains(path), fm.fileExists(atPath: path) else { return }
+            seen.insert(path)
+            paths.append(path)
+        }
+
+        add(appDestination)
+
+        let current = Bundle.main.bundlePath
+        if current.hasSuffix(".app"),
+           Bundle.main.bundleIdentifier == AppInfo.bundleID {
+            add(current)
+        }
+        return paths
+    }
+
+    /// 从已启用列表移除输入源，并尽量禁用 TIS 源
+    private static func disableInputSource() {
+        let domain = "com.apple.HIToolbox" as CFString
+        let key = "AppleEnabledInputSources" as CFString
+
+        if var list = CFPreferencesCopyAppValue(key, domain) as? [[String: Any]] {
+            let before = list.count
+            list.removeAll { ($0["Input Mode"] as? String) == inputSourceID }
+            if list.count != before {
+                CFPreferencesSetAppValue(key, list as CFArray, domain)
+                CFPreferencesAppSynchronize(domain)
+            }
+        }
+
+        if let src = findInputSource(inputSourceID) {
+            TISDisableInputSource(src)
+        }
+        notifyInputSourceChanged()
     }
 
     // MARK: - 工具

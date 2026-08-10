@@ -1,67 +1,73 @@
 import Foundation
 
 /// 用户的初始配置快照
-/// 「恢复默认」会还原到这份配置，即最初手工调好的 macOS 风格
+/// 「恢复默认」会还原到这份配置，首次安装铺设的也是它
 enum DefaultProfile {
 
-    /// 外观：macos_light / macos_dark 两套自定义主题
+    /// 外观：daxia_custom / daxia_custom_dark 两套自定义配色
+    ///
+    /// 不写 style/font_face：手札体等附加字体属于 macOS 按需下载，
+    /// 新机器上没有，写死会静默回退且与预期不符。留空即跟随系统字体，
+    /// 用户想换字体在「输入设置」里选。
     static let squirrelCustom = """
     # 鼠须管外观配置
     patch:
       config_version: '2026-08-09'
 
       # 亮色/暗色模式各自的主题
-      style/color_scheme: macos_light
-      style/color_scheme_dark: macos_dark
+      style/color_scheme: daxia_custom
+      style/color_scheme_dark: daxia_custom_dark
 
       # 排版为全局设置，主题内不再重复定义
       style/candidate_list_layout: linear
       style/text_orientation: horizontal
-      style/font_point: 17
-      style/label_font_point: 14
+      style/font_point: 21
+      style/label_font_point: 20
       style/candidate_format: "%c\\u2005%@"
+      style/corner_radius: 8
+      style/hilited_corner_radius: 10
+      style/shadow_size: 0
+      style/border_width: 0
+      style/border_height: 0
+      style/line_spacing: 5
+      style/inline_preedit: true
+      style/show_paging: false
+      style/translucency: false
 
-      preset_color_schemes/macos_light:
-        name: "macOS Light"
-        author: "QoderWork"
-        inline_preedit: true                 # 拼音内嵌在光标处
-        corner_radius: 8
-        hilited_corner_radius: 6
-        border_height: 8
-        border_width: 10
-        spacing: 8
-        font_face: "PingFangSC"
-        back_color: 0xFFFFFF                 # 白色背景
-        candidate_text_color: 0x262626       # 候选词深灰
-        label_color: 0xA0A0A0                # 序号浅灰
-        comment_text_color: 0xA0A0A0
-        text_color: 0x808080
-        hilited_text_color: 0x262626
-        hilited_candidate_back_color: 0xFF7A00   # Apple 蓝 #007AFF
-        hilited_candidate_text_color: 0xFFFFFF
-        hilited_candidate_label_color: 0xFFFFFF
-        hilited_comment_text_color: 0xF0F0F0
+      # 必须写成嵌套的 preset_color_schemes: 段，不能用
+      # `preset_color_schemes/xxx:` 扁平路径。后者 librime 认，但界面的
+      # ThemeLibrary 靠定位 `preset_color_schemes:` 段来解析主题，
+      # 扁平写法会导致解析不到，恢复默认后预览与取色器读不出颜色。
+      preset_color_schemes:
+        daxia_custom:
+          name: "自定义-浅色"
+          author: 大侠输入法
+          back_color: 0xFFF4F4F6
+          candidate_text_color: 0x222222
+          hilited_candidate_text_color: 0x4F11FA
+          hilited_candidate_back_color: 0xC7F1D2
+          hilited_candidate_label_color: 0x4F11FA
+          label_color: 0x939100
+          comment_text_color: 0x939100
+          text_color: 0x939100
+          hilited_text_color: 0x222222
+          hilited_back_color: 0xF4F4F6
+          border_color: 0xF4F4F6
 
-      preset_color_schemes/macos_dark:
-        name: "macOS Dark"
-        author: "QoderWork"
-        inline_preedit: true
-        corner_radius: 8
-        hilited_corner_radius: 6
-        border_height: 8
-        border_width: 10
-        spacing: 8
-        font_face: "PingFangSC"
-        back_color: 0x282828                 # 深灰背景
-        candidate_text_color: 0xE0E0E0       # 候选词浅白
-        label_color: 0x707070
-        comment_text_color: 0x707070
-        text_color: 0x808080
-        hilited_text_color: 0xE0E0E0
-        hilited_candidate_back_color: 0xFF7A00   # Apple 蓝
-        hilited_candidate_text_color: 0xFFFFFF
-        hilited_candidate_label_color: 0xFFFFFF
-        hilited_comment_text_color: 0xF0F0F0
+        daxia_custom_dark:
+          name: "自定义-深色"
+          author: 大侠输入法
+          back_color: 0xFF000000
+          candidate_text_color: 0xFFFFFF
+          hilited_candidate_text_color: 0xFFFFFF
+          hilited_candidate_back_color: 0xD75A00
+          hilited_candidate_label_color: 0xFFFFFF
+          label_color: 0x999999
+          comment_text_color: 0x999999
+          text_color: 0x999999
+          hilited_text_color: 0xFFFFFF
+          hilited_back_color: 0x000000
+          border_color: 0x000000
     """
 
     /// 常用设置：只保留雾凇全拼、候选 7 个、Caps Lock 切英文
@@ -84,15 +90,9 @@ enum DefaultProfile {
         Control_R: noop
     """
 
-    /// 方案配置：Shift 切换中英文 + 万象语法模型
-    /// 注意：不含模糊音，保持默认的精确输入
-    static let schemaCustom = """
-    # rime_ice 方案用户配置
-    patch:
-      # 注入 Shift 切换中英文处理器（放在最前面，优先处理）
-      "engine/processors/@before 0": lua_processor@*shift_toggle
-
-      # 万象语法模型（octagram 插件）：按上下文语境调整同音词顺序
+    /// 语法模型补丁块（带标记，供开关读写）
+    static let grammarPatchBlock = """
+      # >>> RimeKit 语法模型 开始 <<<
       grammar:
         language: wanxiang-lts-zh-hans
         collocation_max_length: 6
@@ -103,13 +103,56 @@ enum DefaultProfile {
         rear_penalty: -20
       translator/contextual_suggestions: false
       translator/max_homophones: 8
+      # >>> RimeKit 语法模型 结束 <<<
     """
+
+    /// 语法模型补丁按行拆分，写入时用
+    static var grammarPatchLines: [String] {
+        grammarPatchBlock
+            .components(separatedBy: "\n")
+            .filter { !$0.isEmpty }
+    }
+
+    /// 模糊音补丁块（带标记，供开关读写）
+    /// 默认开启平翘舌与 n/l 不分，覆盖最常见的南方发音习惯
+    static let fuzzyPatchBlock = """
+      # >>> RimeKit 模糊音 开始 <<<
+      speller/algebra/+:
+        - derive/^([zcs])h/$1/
+        - derive/^([zcs])([^h])/$1h$2/
+        - derive/^l/n/
+        - derive/^n/l/
+      # >>> RimeKit 模糊音 结束 <<<
+    """
+
+    /// 输入行为补丁块：中文标点、简体、开 Emoji
+    /// 字段顺序与 AppStore.writePunctuation 保持一致，便于开关回读
+    static let punctPatchBlock = """
+      # >>> RimeKit 输入行为 开始 <<<
+      "switches/@ascii_punct/reset": 0
+      "switches/@traditionalization/reset": 0
+      "switches/@emoji/reset": 1
+      # >>> RimeKit 输入行为 结束 <<<
+    """
+
+    /// Shift 切换中英文的处理器块（带标记）
+    static let shiftPatchBlock = """
+      # >>> RimeKit Shift切换 开始 <<<
+      "engine/processors/@before 0": lua_processor@*shift_toggle
+      # >>> RimeKit Shift切换 结束 <<<
+    """
+
+    /// 方案配置：Shift 切换中英文 + 万象语法模型 + 模糊音 + 输入行为
+    static let schemaCustom = """
+    # rime_ice 方案用户配置
+    patch:
+    """ + "\n" + shiftPatchBlock + "\n" + grammarPatchBlock + "\n"
+        + fuzzyPatchBlock + "\n" + punctPatchBlock + "\n"
 
     /// 无语法模型版本：语法模型文件不存在时使用，避免部署报错
     static let schemaCustomNoGrammar = """
     # rime_ice 方案用户配置
     patch:
-      # 注入 Shift 切换中英文处理器（放在最前面，优先处理）
-      "engine/processors/@before 0": lua_processor@*shift_toggle
-    """
+    """ + "\n" + shiftPatchBlock + "\n" + fuzzyPatchBlock + "\n"
+        + punctPatchBlock + "\n"
 }

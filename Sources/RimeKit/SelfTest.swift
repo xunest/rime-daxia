@@ -180,8 +180,23 @@ enum SelfTest {
 
         print("== 默认配置快照 ==")
 
-        check("外观快照含 macos_light",
-              DefaultProfile.squirrelCustom.contains("preset_color_schemes/macos_light"))
+        check("外观快照含自定义浅色配色",
+              DefaultProfile.squirrelCustom.contains("preset_color_schemes:"))
+        // 关键：预设必须能被界面的解析器读出来，否则「恢复默认」后
+        // 预览和取色器拿不到颜色（扁平的 preset_color_schemes/xxx: 就会这样）
+        let profileThemes = ThemeLibrary(yamlContent: DefaultProfile.squirrelCustom).themes
+        check("外观快照能被主题解析器读出",
+              profileThemes.contains { $0.id == CustomScheme.lightID }
+              && profileThemes.contains { $0.id == CustomScheme.darkID })
+        check("外观快照解析出的颜色非空",
+              profileThemes.first { $0.id == CustomScheme.lightID }?.backColor != nil
+              && profileThemes.first { $0.id == CustomScheme.darkID }?.backColor != nil)
+        check("外观快照选中自定义配色",
+              DefaultProfile.squirrelCustom.contains("style/color_scheme: daxia_custom")
+              && DefaultProfile.squirrelCustom.contains("style/color_scheme_dark: daxia_custom_dark"))
+        // 附加字体（手札体等）新机器上没有，预设不能写死 font_face
+        check("外观快照不锁定字体",
+              !DefaultProfile.squirrelCustom.contains("font_face"))
         check("外观快照走全局排版",
               DefaultProfile.squirrelCustom.contains("style/candidate_list_layout: linear"))
         check("外观快照主题内无排版字段",
@@ -199,10 +214,45 @@ enum SelfTest {
               DefaultProfile.defaultCustom.contains("Caps_Lock: clear"))
         check("方案快照含语法模型",
               DefaultProfile.schemaCustom.contains("wanxiang-lts-zh-hans"))
+        check("方案快照含语法模型标记",
+              DefaultProfile.schemaCustom.contains("RimeKit 语法模型"))
         check("方案快照含 shift_toggle",
               DefaultProfile.schemaCustom.contains("shift_toggle"))
-        check("方案快照不含模糊音",
-              !DefaultProfile.schemaCustom.contains("derive/"))
+        check("方案快照含平翘舌模糊音",
+              DefaultProfile.schemaCustom.contains("derive/^([zcs])h/$1/"))
+        check("方案快照含 n/l 模糊音",
+              DefaultProfile.schemaCustom.contains("derive/^l/n/"))
+        check("方案快照不含未选的模糊音",
+              !DefaultProfile.schemaCustom.contains("derive/^f/h/")
+              && !DefaultProfile.schemaCustom.contains("derive/ang$/an/"))
+        check("方案快照含输入行为块",
+              DefaultProfile.schemaCustom.contains("\"switches/@ascii_punct/reset\": 0")
+              && DefaultProfile.schemaCustom.contains("\"switches/@emoji/reset\": 1"))
+        // 无语法模型的备用版本也要带齐其余设置
+        check("备用方案快照含模糊音",
+              DefaultProfile.schemaCustomNoGrammar.contains("derive/^l/n/"))
+        check("备用方案快照含输入行为",
+              DefaultProfile.schemaCustomNoGrammar.contains("switches/@emoji/reset"))
+
+        // 每个补丁块的起止标记必须成对，否则开关读写会错乱
+        for (name, text) in [("模糊音", DefaultProfile.fuzzyPatchBlock),
+                             ("输入行为", DefaultProfile.punctPatchBlock),
+                             ("Shift切换", DefaultProfile.shiftPatchBlock),
+                             ("语法模型", DefaultProfile.grammarPatchBlock)] {
+            check("\(name)块标记成对",
+                  text.contains("开始 <<<") && text.contains("结束 <<<"))
+        }
+
+        let gOn = AppStore()
+        gOn.grammarOn = true
+        let gLines = gOn.testGrammarPatchLines()
+        check("开启语法模型时含 language",
+              gLines.contains { $0.contains("wanxiang-lts-zh-hans") })
+        check("开启语法模型时含起止标记",
+              gLines.contains { $0.contains("语法模型 开始") }
+              && gLines.contains { $0.contains("语法模型 结束") })
+        gOn.grammarOn = false
+        check("关闭语法模型时无补丁行", gOn.testGrammarPatchLines().isEmpty)
 
         // 三份快照都得是合法的 patch 结构
         for (name, text) in [("外观", DefaultProfile.squirrelCustom),
@@ -821,6 +871,11 @@ enum SelfTest {
         check("输入源 ID 以引擎 bundle ID 为前缀",
               Installer.inputSourceID.hasPrefix(Installer.engineBundleID + "."))
 
+        // 卸载范围是显式枚举，避免误传字符串
+        let only = Installer.UninstallScope.settingsOnly
+        let all = Installer.UninstallScope.everything
+        check("卸载范围 settingsOnly 与 everything 不同", only != all)
+
         // 只补缺失项：对方已有的词库和设置不能被覆盖
         let fm = FileManager.default
         let sandbox = URL(fileURLWithPath: NSTemporaryDirectory())
@@ -888,6 +943,25 @@ enum SelfTest {
                   icon.tiffRepresentation
                       .flatMap { NSBitmapImageRep(data: $0) }
                       .flatMap { $0.representation(using: .png, properties: [:]) } != nil)
+        }
+
+        // 菜单栏 PDF：必须是矢量且圆底占满画布，
+        // 否则在菜单栏里会比其它输入法图标明显偏小
+        let pdfURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("selftest_rime.pdf")
+        do {
+            try AppIcon.exportMenuBarPDF(to: pdfURL)
+            let data = try Data(contentsOf: pdfURL)
+            check("菜单栏图标是 PDF", data.prefix(4) == Data("%PDF".utf8))
+            let text = String(decoding: data, as: UTF8.self)
+            check("菜单栏图标画布为 16x16",
+                  text.contains("/MediaBox [0 0 16 16]"))
+            // 位图 PDF 会带 /Image 子类型，矢量的不会
+            check("菜单栏图标为矢量而非位图",
+                  !text.contains("/Subtype /Image"))
+            try? FileManager.default.removeItem(at: pdfURL)
+        } catch {
+            check("菜单栏图标可导出", false, "\(error.localizedDescription)")
         }
 
         print("")

@@ -168,8 +168,10 @@ enum AppIcon {
     /// 纯矢量路径：把 PNG 用 sips 转出来的 PDF 内嵌的是位图，
     /// 系统按原始像素尺寸渲染，会把列表行高撑到极大且显示不出内容。
     ///
-    /// 只画「侠」字轮廓，不画背景与印章：菜单栏图标要能随深浅色反色，
-    /// 带底色反而会糊成一块。
+    /// 画法参考微信输入法：实心圆底 + 反白的「侠」字。
+    /// 菜单栏图标是模板图（只认覆盖区域，颜色由系统按深浅色决定），
+    /// 所以「反白」要靠 even-odd 填充把字形从圆里挖空，
+    /// 挖空处透出背景色，视觉上就是黑底白字。
     static func exportMenuBarPDF(to url: URL) throws {
         // 16pt 是菜单栏图标的标准尺寸，矢量可无损放大
         let side: CGFloat = 16
@@ -184,28 +186,56 @@ enum AppIcon {
         }
 
         ctx.beginPDFPage(nil)
-        // 用字形轮廓填充而非 CTFontDrawGlyphs 位图化，保证输出是矢量路径
-        let font = NSFont(name: "STKaiti", size: side * 0.92)
-            ?? NSFont(name: "Kaiti SC", size: side * 0.92)
-            ?? NSFont.systemFont(ofSize: side * 0.92, weight: .semibold)
+
+        let combined = CGMutablePath()
+
+        // 圆底占满画布：微信输入法的图标也是 16x16 满画布，
+        // 之前留 2% 边距导致视觉上比邻居小一圈
+        combined.addEllipse(in: box)
+
+        // 字形轮廓作为挖空区。用黑体而非楷体：楷体笔画细，
+        // 缩到 16pt 反白后笔画会被圆底吃掉，看不出是什么字。
+        //
+        // 字号不等于墨迹大小：汉字实际轮廓通常只占字号的 7 成左右，
+        // 所以这里先按字号取轮廓，再按实测 boundingBox 缩放到目标墨迹尺寸，
+        // 否则字看起来会明显偏小。
+        let font = NSFont(name: "PingFangSC-Semibold", size: side)
+            ?? NSFont(name: "STHeitiSC-Medium", size: side)
+            ?? NSFont.systemFont(ofSize: side, weight: .semibold)
         let ctFont = font as CTFont
+
+        // 目标墨迹边长占画布的比例。圆的内接正方形边长是直径的 0.707，
+        // 取 0.62 让字尽量大又不触碰圆边（留出反白需要的圆环）
+        let inkRatio: CGFloat = 0.62
 
         var glyph = CGGlyph()
         var char = UniChar(("侠".utf16.first) ?? 0)
         if CTFontGetGlyphsForCharacters(ctFont, &char, &glyph, 1),
            let path = CTFontCreatePathForGlyph(ctFont, glyph, nil) {
             let b = path.boundingBox
-            // 居中：字形坐标以基线原点为准，需按实际轮廓偏移
-            var transform = CGAffineTransform(
-                translationX: box.midX - b.midX,
-                y: box.midY - b.midY
-            )
-            if let centered = path.copy(using: &transform) {
-                ctx.addPath(centered)
-                ctx.setFillColor(NSColor.black.cgColor)
-                ctx.fillPath()
+            let longest = max(b.width, b.height)
+            if longest > 0 {
+                let scale = side * inkRatio / longest
+                // 先缩放，再按缩放后的轮廓居中
+                var scaleT = CGAffineTransform(scaleX: scale, y: scale)
+                if let scaled = path.copy(using: &scaleT) {
+                    let sb = scaled.boundingBox
+                    var moveT = CGAffineTransform(
+                        translationX: box.midX - sb.midX,
+                        y: box.midY - sb.midY
+                    )
+                    if let centered = scaled.copy(using: &moveT) {
+                        combined.addPath(centered)
+                    }
+                }
             }
         }
+
+        ctx.addPath(combined)
+        ctx.setFillColor(NSColor.black.cgColor)
+        // even-odd：圆与字形的重叠部分相互抵消，字被挖成透明
+        ctx.fillPath(using: .evenOdd)
+
         ctx.endPDFPage()
         ctx.closePDF()
 

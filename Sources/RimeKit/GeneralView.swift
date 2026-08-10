@@ -119,6 +119,12 @@ struct GeneralView: View {
                 SettingRow("显示翻页箭头") {
                     switchToggle($store.showPaging)
                 }
+                Divider()
+
+                SettingRow("候选词显示拼音",
+                           hint: "候选词后附拼音注释，便于确认读音") {
+                    switchToggle($store.keepComments)
+                }
             }
         }
         .groupBoxStyle(PlainGroupBoxStyle())
@@ -180,6 +186,11 @@ struct GeneralView: View {
                     switchToggle($store.emojiOn)
                 }
                 Divider()
+                SettingRow("终端与编辑器默认英文",
+                           hint: "切到终端、VS Code、Xcode 等自动进入英文状态") {
+                    switchToggle($store.asciiForDevApps)
+                }
+                Divider()
                 noteRow("成对符号自动补齐由雾凇拼音内置，已默认开启",
                         icon: "keyboard", color: .secondary)
             }
@@ -191,6 +202,14 @@ struct GeneralView: View {
     private var dictSection: some View {
         GroupBox(label: Text("词库与记忆").font(.headline)) {
             VStack(spacing: 0) {
+                SettingRow("万象语法模型",
+                           hint: store.grammarAvailable
+                           ? "按语境调整同音词与整句排序，提升选词效率"
+                           : "未找到语法模型文件，无法开启") {
+                    switchToggle($store.grammarOn)
+                        .disabled(!store.grammarAvailable)
+                }
+                Divider()
                 SettingRow("智能调频",
                            hint: "常用词自动前排，已内置且始终开启") {
                     Text("已开启")

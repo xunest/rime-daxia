@@ -42,10 +42,20 @@ final class AppStore: ObservableObject {
     @Published var traditionalDefault: Bool = false  // 默认输出繁体
     @Published var emojiOn: Bool = true         // Emoji 候选
     @Published var commaPaging: Bool = true     // 逗号句号翻页
+    @Published var grammarOn: Bool = false      // 万象语法模型
+    @Published var keepComments: Bool = false   // 候选词显示拼音注释
+    @Published var asciiForDevApps: Bool = false // 终端/IDE 自动切英文
 
     // 状态提示
     @Published var toast: String = ""
     @Published var toastIsError = false
+
+    /// 万象语法模型文件是否已安装
+    var grammarAvailable: Bool {
+        FileManager.default.fileExists(
+            atPath: RimeConfig.rimeDir
+                .appendingPathComponent("wanxiang-lts-zh-hans.gram").path)
+    }
 
     /// 安装是否就绪。安装状态要查文件系统，不能每次渲染都查，
     /// 且 RimeConfig 是嵌套的 ObservableObject，它的变更不会刷新
@@ -193,6 +203,20 @@ final class AppStore: ObservableObject {
 
         loadFuzzyState()
         loadPunctState()
+        loadGrammarState()
+        loadKeepCommentsState()
+        loadAppOptionsState(from: squirrelText)
+    }
+
+    /// 读取拼音注释开关
+    private func loadKeepCommentsState() {
+        let text = config.read(.schema)
+        keepComments = text.contains("\"translator/keep_comments\": true")
+    }
+
+    /// 读取「终端 / IDE 默认英文」开关
+    private func loadAppOptionsState(from text: String) {
+        asciiForDevApps = text.contains("# >>> RimeKit 应用默认英文 开始 <<<")
     }
 
     /// 从选中主题的 back_color 反推透明度
@@ -572,8 +596,11 @@ final class AppStore: ObservableObject {
             try config.write(editor.content, to: .defaults)
             // 候选窗样式（字号、排版、透明度）也在本页调整，一并保存
             try writeCandidateStyle()
+            try writeGrammar()
             try applyFuzzy()
             try writePunctuation()
+            try writeKeepComments()
+            try writeAppOptions()
             showToast("设置已保存，点「应用并部署」生效")
         } catch {
             showToast("保存失败：\(error.localizedDescription)", error: true)
@@ -656,6 +683,98 @@ final class AppStore: ObservableObject {
         if newText != text {
             try config.write(newText, to: .schema)
         }
+    }
+
+    /// 读取万象语法模型开关
+    func loadGrammarState() {
+        let text = config.read(.schema)
+        grammarOn = text.contains("language: wanxiang-lts-zh-hans")
+            || text.contains("language: \"wanxiang-lts-zh-hans\"")
+    }
+
+    /// 写入或移除语法模型补丁块
+    private func writeGrammar() throws {
+        let text = config.read(.schema)
+        var lines = text.components(separatedBy: "\n")
+
+        let beginMark = "  # >>> RimeKit 语法模型 开始 <<<"
+        let endMark = "  # >>> RimeKit 语法模型 结束 <<<"
+        if let b = lines.firstIndex(of: beginMark),
+           let e = lines.firstIndex(of: endMark), b < e {
+            lines.removeSubrange(b...e)
+        } else {
+            // 兼容无标记的旧写法：整块清掉 grammar 与相关 translator 项
+            lines = stripLegacyGrammar(from: lines)
+        }
+
+        if grammarOn {
+            guard grammarAvailable else {
+                throw NSError(
+                    domain: "RimeKit", code: 1,
+                    userInfo: [NSLocalizedDescriptionKey:
+                        "未找到 wanxiang-lts-zh-hans.gram，无法开启语法模型"])
+            }
+            let block = DefaultProfile.grammarPatchLines
+            var insertAt = lines.count
+            if let patchIdx = lines.firstIndex(where: {
+                $0.trimmingCharacters(in: .whitespaces).hasPrefix("patch:")
+            }) {
+                var i = patchIdx + 1
+                insertAt = patchIdx + 1
+                while i < lines.count {
+                    let line = lines[i]
+                    let trimmed = line.trimmingCharacters(in: .whitespaces)
+                    if trimmed.isEmpty { i += 1; continue }
+                    let indent = line.prefix(while: { $0 == " " }).count
+                    if indent == 0 && !trimmed.hasPrefix("#") { break }
+                    insertAt = i + 1
+                    i += 1
+                }
+            } else {
+                lines.append("patch:")
+                insertAt = lines.count
+            }
+            lines.insert(contentsOf: block, at: insertAt)
+        }
+
+        let newText = lines.joined(separator: "\n")
+        if newText != text {
+            try config.write(newText, to: .schema)
+        }
+    }
+
+    /// 去掉无 RimeKit 标记的旧 grammar 段
+    private func stripLegacyGrammar(from lines: [String]) -> [String] {
+        var result: [String] = []
+        var i = 0
+        while i < lines.count {
+            let trimmed = lines[i].trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("grammar:") {
+                i += 1
+                while i < lines.count {
+                    let t = lines[i].trimmingCharacters(in: .whitespaces)
+                    let indent = lines[i].prefix(while: { $0 == " " }).count
+                    if t.isEmpty { i += 1; continue }
+                    // grammar 子项缩进大于 patch 项（2 空格）
+                    if indent <= 2 && !t.hasPrefix("#") { break }
+                    i += 1
+                }
+                continue
+            }
+            if trimmed.hasPrefix("translator/contextual_suggestions:")
+                || trimmed.hasPrefix("translator/max_homophones:") {
+                i += 1
+                continue
+            }
+            result.append(lines[i])
+            i += 1
+        }
+        return result
+    }
+
+    /// 供自测：生成当前开关对应的语法模型补丁行
+    func testGrammarPatchLines() -> [String] {
+        grammarOn ? DefaultProfile.grammarPatchLines : []
     }
 
     /// 读取模糊音当前状态
@@ -742,6 +861,99 @@ final class AppStore: ObservableObject {
         lines.insert(contentsOf: block, at: insertAt)
 
         try config.write(lines.joined(separator: "\n"), to: .schema)
+    }
+
+    /// 需要默认英文输入的 App。终端与代码编辑器里绝大多数输入是英文，
+    /// 由鼠须管前端按 App 记住 ascii_mode，切过去就是英文状态。
+    static let devAppBundleIDs = [
+        "com.apple.Terminal",
+        "com.googlecode.iterm2",
+        "dev.warp.Warp-Stable",
+        "com.microsoft.VSCode",
+        "com.microsoft.VSCodeInsiders",
+        "com.apple.dt.Xcode",
+        "com.todesktop.230313mzl4w4u92",   // Cursor
+        "cn.trae.app",
+        "com.jetbrains.pycharm",
+        "com.jetbrains.intellij",
+        "com.jetbrains.goland",
+        "com.sublimetext.4"
+    ]
+
+    /// 候选词拼音注释：写 translator/keep_comments
+    /// 雾凇方案已内置 spelling_hints 与 comment_format，这里只开总闸
+    private func writeKeepComments() throws {
+        let text = config.read(.schema)
+        var lines = text.components(separatedBy: "\n")
+
+        let beginMark = "  # >>> RimeKit 拼音注释 开始 <<<"
+        let endMark = "  # >>> RimeKit 拼音注释 结束 <<<"
+        if let b = lines.firstIndex(of: beginMark),
+           let e = lines.firstIndex(of: endMark), b < e {
+            lines.removeSubrange(b...e)
+        }
+
+        // 关闭时只做清理，让方案回到自身默认
+        if keepComments {
+            let block = [
+                beginMark,
+                "  \"translator/keep_comments\": true",
+                endMark
+            ]
+            lines.insert(contentsOf: block, at: Self.patchInsertIndex(in: &lines))
+        }
+
+        try config.write(lines.joined(separator: "\n"), to: .schema)
+    }
+
+    /// 终端 / IDE 默认英文：写鼠须管前端的 app_options
+    private func writeAppOptions() throws {
+        var text = config.read(.squirrel)
+        if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            text = "# 鼠须管外观配置\npatch:\n"
+        }
+        var lines = text.components(separatedBy: "\n")
+
+        let beginMark = "  # >>> RimeKit 应用默认英文 开始 <<<"
+        let endMark = "  # >>> RimeKit 应用默认英文 结束 <<<"
+        if let b = lines.firstIndex(of: beginMark),
+           let e = lines.firstIndex(of: endMark), b < e {
+            lines.removeSubrange(b...e)
+        }
+
+        if asciiForDevApps {
+            var block = [beginMark]
+            for id in Self.devAppBundleIDs {
+                block.append("  \"app_options/\(id)/ascii_mode\": true")
+            }
+            block.append(endMark)
+            lines.insert(contentsOf: block, at: Self.patchInsertIndex(in: &lines))
+        }
+
+        try config.write(lines.joined(separator: "\n"), to: .squirrel)
+    }
+
+    /// 找 patch: 段末尾的插入位置，没有 patch: 就补一个
+    private static func patchInsertIndex(in lines: inout [String]) -> Int {
+        guard let patchIdx = lines.firstIndex(where: {
+            $0.trimmingCharacters(in: .whitespaces).hasPrefix("patch:")
+        }) else {
+            lines.append("patch:")
+            return lines.count
+        }
+
+        var insertAt = patchIdx + 1
+        var i = patchIdx + 1
+        while i < lines.count {
+            let line = lines[i]
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty { i += 1; continue }
+            let indent = line.prefix(while: { $0 == " " }).count
+            if indent == 0 && !trimmed.hasPrefix("#") { break }
+            insertAt = i + 1
+            i += 1
+        }
+        return insertAt
     }
 
     func deploy() {
